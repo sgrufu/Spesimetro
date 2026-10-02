@@ -58,11 +58,18 @@ label.file input{position:absolute;opacity:0;width:1px;height:1px}
 .banner{background:var(--warn-soft);color:var(--warn-ink);border-radius:10px;padding:.7rem .9rem;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;font-size:.9rem}
 .banner button{background:transparent;border-color:currentColor;color:inherit}
 
-.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .summary>div{background:var(--surface);padding:14px 16px;display:grid;gap:4px;min-width:0}
 .summary .big{font-family:var(--display);font-size:1.45rem;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .summary .hint{font-size:.8rem;color:var(--muted)}
-@media (max-width:720px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.summary .range{grid-column:1/-1}
+.range-row{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;justify-content:space-between}
+.range-dates{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:.85rem;color:var(--muted)}
+.range-dates label{display:inline-flex;gap:6px;align-items:center}
+.range-dates input{padding:.25rem .4rem;font-size:.85rem;min-width:0}
+.hint.inline{display:inline-flex;gap:4px;align-items:center}
+.hint select{padding:.05rem .25rem;font-size:.8rem;border-radius:6px}
+@media (max-width:720px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.summary>div:first-child{grid-column:1/-1}}
 
 section.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:12px;min-width:0}
 .panel-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between}
@@ -163,8 +170,15 @@ footer{font-size:.8rem;color:var(--muted);max-width:70ch}
   <div class="summary" aria-label="Riepilogo">
     <div><span class="label">Liquidità totale</span><span class="big" id="kLiq">–</span><span class="hint" id="kLiqHint"></span></div>
     <div><span class="label" id="kMonthLabel">Spese del mese</span><span class="big" id="kSpend">–</span><span class="hint" id="kSpendHint"></span></div>
-    <div><span class="label">Media mensile</span><span class="big" id="kAvg">–</span><span class="hint" id="kAvgHint"></span></div>
-    <div><span class="label">Entrate del mese</span><span class="big" id="kIn">–</span><span class="hint" id="kInHint"></span></div>
+    <div><span class="label">Media mensile</span><span class="big" id="kAvg">–</span>
+      <label class="hint inline">su <select id="avgN" aria-label="Mesi su cui calcolare la media"><option value="3">3 mesi</option><option value="6">6 mesi</option><option value="12">12 mesi</option><option value="0">tutti i mesi</option></select></label>
+      <span class="hint" id="kAvgHint"></span></div>
+    <div class="range"><span class="label">Spese in un intervallo</span>
+      <div class="range-row">
+        <span class="big" id="kRange">–</span>
+        <span class="range-dates"><label>dal <input type="date" id="rFrom" aria-label="Dal giorno"></label><label>al <input type="date" id="rTo" aria-label="Al giorno"></label></span>
+      </div>
+      <span class="hint" id="kRangeHint"></span></div>
   </div>
 
   <section class="panel">
@@ -390,18 +404,38 @@ function renderSummary(){
   $('kLiq').textContent=fmt.format(liq);
   $('kLiqHint').textContent=state.accounts.length+(state.accounts.length===1?' conto':' conti');
   const sm=spendByMonth(),ms=Object.keys(sm);
-  if(!ui.month){['kSpend','kAvg','kIn'].forEach(k=>$(k).textContent='–');return}
+  renderRange();
+  $('avgN').value=String(avgN());
+  if(!ui.month){['kSpend','kAvg'].forEach(k=>$(k).textContent='–');$('kAvgHint').textContent='';return}
   $('kMonthLabel').textContent='Spese di '+monthName(ui.month);
   $('kSpend').textContent=fmt.format(sm[ui.month]||0);
-  const last=ms.slice(-6),avg=last.reduce((a,k)=>a+sm[k],0)/(last.length||1);
-  $('kAvg').textContent=fmt.format(avg);
-  $('kAvgHint').textContent='ultimi '+last.length+(last.length===1?' mese':' mesi');
-  const diff=(sm[ui.month]||0)-avg;
-  $('kSpendHint').textContent=(diff>=0?'+':'−')+fmt0.format(Math.abs(diff))+' rispetto alla media';
-  const inc=state.txs.filter(t=>monthOf(t)===ui.month&&t.amt>0&&catOf(t)==='Entrate').reduce((a,t)=>a+t.amt,0);
-  $('kIn').textContent=fmt.format(inc);
-  const net=inc-(sm[ui.month]||0);
-  $('kInHint').textContent='risparmio: '+(net>=0?'':'−')+fmt0.format(Math.abs(net));
+  const A=avgInfo(sm);
+  $('kAvg').textContent=A.n?fmt.format(A.avg):'–';
+  const parts=[];if(avgN()&&A.n<avgN())parts.push('solo '+A.n+(A.n===1?' mese con dati':' mesi con dati'));if(avgN()===0)parts.push(A.n+(A.n===1?' mese':' mesi'));if(A.excl)parts.push('mese in corso escluso');
+  $('kAvgHint').textContent=parts.join(' · ');
+  const diff=(sm[ui.month]||0)-A.avg;
+  $('kSpendHint').textContent=A.n?(diff>=0?'+':'−')+fmt0.format(Math.abs(diff))+' rispetto alla media':'';
+}
+/* media: ultimi N periodi completi (il periodo in corso è escluso perché parziale) */
+function avgN(){const n=state.avgN;return n===0?0:[3,6,12].includes(+n)?+n:6}
+function todayISO(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function avgInfo(sm){
+  const cur=periodOf(todayISO()),all=Object.keys(sm).sort();
+  let ks=all.filter(k=>k<cur);const excl=ks.length<all.length;
+  if(!ks.length)ks=all;
+  const N=avgN();if(N)ks=ks.slice(-N);
+  return {avg:ks.length?ks.reduce((a,k)=>a+sm[k],0)/ks.length:0,n:ks.length,excl:excl&&ks.length>0};
+}
+/* somma delle spese tra due date scelte (estremi inclusi) */
+function rangeDefault(){const t=todayISO();return {from:t.slice(0,4)+'-01-01',to:t}}
+function renderRange(){
+  const r=Object.assign(rangeDefault(),state.range||{});
+  $('rFrom').value=r.from;$('rTo').value=r.to;
+  if(!r.from||!r.to||r.from>r.to){$('kRange').textContent='–';$('kRangeHint').textContent='La data di inizio deve venire prima di quella di fine.';return}
+  let tot=0,n=0;state.txs.forEach(t=>{if(t.date>=r.from&&t.date<=r.to&&isSpendCat(catOf(t))){tot-=t.amt;n++}});
+  const days=Math.round((Date.parse(r.to)-Date.parse(r.from))/864e5)+1;
+  $('kRange').textContent=fmt.format(tot);
+  $('kRangeHint').textContent=`${n} movimenti in ${days} ${days===1?'giorno':'giorni'} · in media ${fmt0.format(tot/days*30.44)} al mese`;
 }
 function renderAccounts(){
   const box=$('accounts');
@@ -442,7 +476,7 @@ function renderChart(){
   const step=niceStep(max/4),top=Math.ceil(max/step)*step;
   const y=v=>pt+(H-pt-pb)*(1-v/top);
   const bw=(W-pl-pr)/ms.length;
-  const avgArr=ms.slice(-6),avg=avgArr.reduce((a,k)=>a+sm[k],0)/avgArr.length;
+  const avg=avgInfo(sm).avg;
   let g='<g class="grid">';
   for(let v=0;v<=top+1e-6;v+=step){g+=`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}"/><text x="${pl-8}" y="${y(v)+4}" text-anchor="end">${fmt0.format(v).replace(/\s?€/,'')}</text>`}
   g+='</g>';
@@ -544,6 +578,8 @@ function newCatInput(sel,t){
   inp.addEventListener('keydown',e=>{if(e.key==='Enter')create();if(e.key==='Escape')renderTxs()});
 }
 ['q','fAcc'].forEach(id=>$(id).addEventListener('input',renderTxs));
+$('avgN').addEventListener('change',()=>{state.avgN=+$('avgN').value;save();renderSummary();renderChart()});
+['rFrom','rTo'].forEach(id=>$(id).addEventListener('change',()=>{state.range={from:$('rFrom').value,to:$('rTo').value};save();renderRange()}));
 { const sd=$('startDay');sd.innerHTML=Array.from({length:28},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
   sd.addEventListener('change',()=>{state.startDay=+sd.value;ui.month=null;ui.cat=null;save();render()}); }
 $('fCat').addEventListener('change',()=>{ui.cat=$('fCat').value||null;renderCats();renderTxs()});
@@ -556,7 +592,7 @@ function onReset(){
 $('resetBtn').addEventListener('click',onReset);
 
 /* ---------- backup e sincronizzazione ---------- */
-function backupJSON(){return JSON.stringify({app:'conti-in-chiaro',v:1,exported:new Date().toISOString(),startDay:startDay(),accounts:state.accounts,txs:state.txs,overrides:state.overrides,owners:state.owners||[],customCats:state.customCats||[]})}
+function backupJSON(){return JSON.stringify({app:'conti-in-chiaro',v:1,exported:new Date().toISOString(),startDay:startDay(),avgN:avgN(),accounts:state.accounts,txs:state.txs,overrides:state.overrides,owners:state.owners||[],customCats:state.customCats||[]})}
 function mergeBackup(b){
   if(!b||b.app!=='conti-in-chiaro'||!Array.isArray(b.accounts)||!Array.isArray(b.txs)) throw new Error('Questo testo non è un backup di Spesimetro. Copialo di nuovo dall\'altro dispositivo con "Copia backup".');
   if(state.sample) state={accounts:[],txs:[],overrides:{},sample:false};
@@ -577,6 +613,7 @@ function mergeBackup(b){
   });
   Object.assign(state.overrides,b.overrides||{});
   if(+b.startDay>1&&startDay()===1)state.startDay=+b.startDay;
+  if(b.avgN!=null&&state.avgN==null)state.avgN=+b.avgN;
   state.customCats=state.customCats||[];(b.customCats||[]).forEach(c=>{if(!state.customCats.includes(c)&&!CATS.includes(c))state.customCats.push(c)});
   state.owners=state.owners||[];(b.owners||[]).forEach(o=>{const k=o.slice().sort().join(' ');if(!state.owners.some(x=>x.slice().sort().join(' ')===k))state.owners.push(o)});
   save();ui.month=null;render();
